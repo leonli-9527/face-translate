@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>麦克风诊断</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  h1 { font-size: 20px; margin-bottom: 8px; color: #f1f5f9; }
+  .subtitle { font-size: 13px; color: #64748b; margin-bottom: 24px; }
+
+  .card {
+    width: 100%;
+    max-width: 480px;
+    background: #1e293b;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid #334155;
+  }
+
+  .card-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .test-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid #0f172a;
+    font-size: 14px;
+  }
+  .test-row:last-child { border-bottom: none; }
+  .test-label { color: #94a3b8; }
+  .test-value { font-weight: 600; }
+  .test-value.pass { color: #4ade80; }
+  .test-value.fail { color: #ef4444; }
+  .test-value.warn { color: #f59e0b; }
+  .test-value.pending { color: #64748b; }
+
+  /* 可视化音量条 */
+  .volume-bar-wrap {
+    width: 100%;
+    height: 8px;
+    background: #0f172a;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 12px;
+    position: relative;
+  }
+  .volume-bar {
+    height: 100%;
+    background: linear-gradient(to right, #22c55e, #eab308, #ef4444);
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.05s;
+  }
+  .volume-avg {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 3px;
+    background: #fff;
+    border-radius: 2px;
+    opacity: 0.8;
+    display: none;
+  }
+
+  /* 波形画布 */
+  #waveCanvas {
+    width: 100%;
+    height: 80px;
+    background: #0f172a;
+    border-radius: 12px;
+    margin-top: 12px;
+    display: block;
+  }
+
+  /* 主按钮 */
+  .big-btn {
+    width: 100%;
+    max-width: 480px;
+    padding: 18px;
+    border-radius: 16px;
+    border: none;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .big-btn.start {
+    background: #3b82f6;
+    color: #fff;
+  }
+  .big-btn.start:active { background: #2563eb; }
+  .big-btn.stop {
+    background: #dc2626;
+    color: #fff;
+    animation: pulse 1.2s infinite;
+  }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,0.5)} 70%{box-shadow:0 0 0 14px rgba(220,38,38,0)} }
+
+  .hint {
+    font-size: 12px;
+    color: #64748b;
+    text-align: center;
+    margin-top: 8px;
+  }
+
+  /* 识别文字展示 */
+  .recog-output {
+    margin-top: 16px;
+    padding: 14px;
+    background: #0f172a;
+    border-radius: 12px;
+    font-size: 16px;
+    min-height: 50px;
+    line-height: 1.6;
+    color: #e2e8f0;
+    word-break: break-word;
+  }
+  .recog-output.empty { color: #475569; font-style: italic; }
+
+  .step-btn {
+    margin-top: 12px;
+    padding: 12px 20px;
+    border-radius: 12px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .step-btn.primary { background: #3b82f6; color: #fff; }
+  .step-btn.primary:active { background: #2563eb; }
+  .step-btn.active { background: #dc2626; color: #fff; animation: stepPulse 1.2s infinite; }
+  .step-btn:disabled { background: #334155; color: #64748b; cursor: not-allowed; animation: none; }
+  @keyframes stepPulse { 0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,0.5)} 70%{box-shadow:0 0 0 10px rgba(220,38,38,0)} }
+
+  /* 回放 */
+  .playback-btn {
+    margin-top: 10px;
+    padding: 8px 16px;
+    background: #334155;
+    border: none;
+    border-radius: 8px;
+    color: #e2e8f0;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .playback-btn:active { background: #475569; }
+
+  .log {
+    width: 100%;
+    max-width: 480px;
+    background: #0f172a;
+    border-radius: 12px;
+    padding: 14px;
+    margin-top: 8px;
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.8;
+    color: #94a3b8;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  .log-entry { border-bottom: 1px solid #1e293b; padding-bottom: 6px; margin-bottom: 6px; }
+  .log-entry:last-child { border-bottom: none; }
+  .log-time { color: #475569; margin-right: 8px; }
+  .log-ok { color: #4ade80; }
+  .log-err { color: #ef4444; }
+  .log-warn { color: #f59e0b; }
+
+  .back-btn {
+    margin-top: 20px;
+    padding: 10px 24px;
+    background: #334155;
+    border: none;
+    border-radius: 10px;
+    color: #e2e8f0;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .back-btn:active { background: #475569; }
+
+  .net-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: #7c3aed;
+    color: #fff;
+    font-size: 13px;
+    text-align: center;
+    padding: 10px 16px;
+    z-index: 300;
+    display: none;
+  }
+  .net-banner.show { display: block; }
+</style>
+</head>
+<body>
+
+<h1>🎤 麦克风诊断工具</h1>
+<p class="subtitle">逐一排查问题，找到原因</p>
+
+<!-- 步骤1：检测浏览器支持 -->
+<div class="card">
+  <div class="card-title">📋 Step 1 · 浏览器支持检测</div>
+  <div class="test-row">
+    <span class="test-label">浏览器</span>
+    <span class="test-value" id="t-browser">检测中...</span>
+  </div>
+  <div class="test-row">
+    <span class="test-label">Web Speech API</span>
+    <span class="test-value" id="t-speech-api">检测中...</span>
+  </div>
+  <div class="test-row">
+    <span class="test-label">Web Audio API</span>
+    <span class="test-value" id="t-audio-api">检测中...</span>
+  </div>
+  <div class="test-row">
+    <span class="test-label">麦克风权限</span>
+    <span class="test-value" id="t-permission">检测中...</span>
+  </div>
+</div>
+
+<!-- 步骤2：麦克风访问 + 音量可视化 -->
+<div class="card">
+  <div class="card-title">📊 Step 2 · 麦克风音量测试</div>
+  <div class="test-row">
+    <span class="test-label">麦克风设备</span>
+    <span class="test-value" id="t-device">—</span>
+  </div>
+  <div class="test-row">
+    <span class="test-label">实时音量</span>
+    <span class="test-value" id="t-volume">—</span>
+  </div>
+  <div class="volume-bar-wrap">
+    <div class="volume-bar" id="volBar"></div>
+  </div>
+  <canvas id="waveCanvas"></canvas>
+  <button class="step-btn primary" id="btnMic" onclick="requestMic()">
+    <span>🎤</span>
+    <span id="btnMicText">点击获取麦克风权限</span>
+  </button>
+</div>
+
+<!-- 步骤3：语音识别测试 -->
+<div class="card">
+  <div class="card-title">🗣️ Step 3 · 语音识别测试</div>
+  <div id="recogOutput" class="recog-output empty">点击下方按钮开始说话，识别结果会显示在这里</div>
+  <button class="step-btn primary" id="btnSpeech" onclick="toggleSpeechTest()">
+    <span id="btnSpeechIcon">🎤</span>
+    <span id="btnSpeechText">开始语音识别</span>
+  </button>
+</div>
+
+<!-- 步骤4：录制回放测试 -->
+<div class="card">
+  <div class="card-title">🔁 Step 4 · 录音回放测试</div>
+  <div id="recStatus" style="font-size:13px;color:#64748b;margin-bottom:10px;">点击开始录音，录完后会播放给你听</div>
+  <button class="big-btn start" id="recBtn" onclick="toggleRecording()">
+    <span id="recBtnIcon">🔴</span>
+    <span id="recBtnText">开始录音</span>
+  </button>
+  <p class="hint" id="recHint"></p>
+  <button class="playback-btn" id="playBtn" style="display:none" onclick="playRecording()">▶ 播放刚才的录音</button>
+</div>
+
+<!-- 日志 -->
+<div class="card">
+  <div class="card-title">📝 诊断日志</div>
+  <div class="log" id="logArea">
+    <div class="log-entry"><span class="log-time">—</span>诊断工具已启动</div>
+  </div>
+</div>
+
+<div class="net-banner" id="netBanner">
+  ⚠️ 网络错误：请确认浏览器已开启全局代理（127.0.0.1:7897）后再试
+</div>
+
+<button class="back-btn" onclick="location.href='face-translate.html'">← 返回翻译工具</button>
+
+<script>
+// ============ 状态 ============
+let stream = null;
+let audioCtx = null;
+let analyser = null;
+let analyserData = null;
+let animationId = null;
+let isRecording = false;
+let mediaRecorder = null;
+let recordedChunks = [];
+let recordedBlob = null;
+let recordingStart = 0;
+let speechRecognition = null;
+let isSpeechTesting = false;
+
+const log = (msg, type = '') => {
+  const area = document.getElementById('logArea');
+  const time = new Date().toLocaleTimeString();
+  const cls = type === 'ok' ? 'log-ok' : type === 'err' ? 'log-err' : type === 'warn' ? 'log-warn' : '';
+  area.innerHTML = `<div class="log-entry"><span class="log-time">${time}</span><span class="${cls}">${msg}</span></div>` + area.innerHTML;
+};
+
+function showNetBanner() { document.getElementById('netBanner').classList.add('show'); }
+function hideNetBanner() { document.getElementById('netBanner').classList.remove('show'); }
+
+// ============ Step 1: 浏览器支持检测 ============
+function detectBrowser() {
+  const ua = navigator.userAgent;
+  if (ua.includes('Chrome')) return 'Chrome ' + (ua.match(/Chrome\/(\S+)/)?.[1] || '');
+  if (ua.includes('Safari') && !ua.includes('Chrome')) return 'Safari ' + (ua.match(/Version\/(\S+)/)?.[1] || '');
+  if (ua.includes('Firefox')) return 'Firefox ' + (ua.match(/Firefox\/(\S+)/)?.[1] || '');
+  return ua.substring(0, 40);
+}
+
+function checkSupport() {
+  // 浏览器
+  const browser = detectBrowser();
+  document.getElementById('t-browser').textContent = browser;
+  document.getElementById('t-browser').className = 'test-value pass';
+
+  // Web Speech API
+  const hasSpeech = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const el = document.getElementById('t-speech-api');
+  el.textContent = hasSpeech ? '✅ 支持' : '❌ 不支持';
+  el.className = 'test-value ' + (hasSpeech ? 'pass' : 'fail');
+  if (!hasSpeech) log('Web Speech API 不支持，当前浏览器无法使用语音识别', 'err');
+
+  // Web Audio API
+  const hasAudio = !!(window.AudioContext || window.webkitAudioContext);
+  const el2 = document.getElementById('t-audio-api');
+  el2.textContent = hasAudio ? '✅ 支持' : '❌ 不支持';
+  el2.className = 'test-value ' + (hasAudio ? 'pass' : 'fail');
+  if (!hasAudio) log('Web Audio API 不支持，无法显示音量', 'err');
+
+  log('浏览器支持检测完成');
+}
+
+// ============ Step 2: 请求麦克风 + 可视化 ============
+async function requestMic() {
+  const el = document.getElementById('t-permission');
+  const btn = document.getElementById('btnMic');
+  el.textContent = '请求中...';
+  el.className = 'test-value warn';
+  btn.disabled = true;
+  btn.querySelector('span:last-child').textContent = '请求中...';
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    el.textContent = '✅ 已授权';
+    el.className = 'test-value pass';
+    log('麦克风权限已获取', 'ok');
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const micDevice = devices.find(d => d.kind === 'audioinput' && d.label);
+    document.getElementById('t-device').textContent = micDevice?.label || '麦克风 #' + (devices.filter(d => d.kind === 'audioinput').length);
+    document.getElementById('t-device').className = 'test-value pass';
+
+    setupAudioAnalyser();
+    startVisualization();
+
+    btn.textContent = '✅ 麦克风已就绪';
+    btn.className = 'step-btn';
+    btn.style.background = '#059669';
+    btn.style.color = '#fff';
+    btn.disabled = false;
+
+  } catch (e) {
+    el.textContent = '❌ 拒绝/失败';
+    el.className = 'test-value fail';
+    log('麦克风权限获取失败: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.querySelector('span:last-child').textContent = '重新请求麦克风';
+    if (e.name === 'NotAllowedError') {
+      log('提示：在浏览器地址栏左侧设置麦克风权限为"允许"', 'warn');
+    }
+  }
+}
+
+function setupAudioAnalyser() {
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyserData = new Uint8Array(analyser.frequencyBinCount);
+    const source = audioCtx.createMediaStreamSource(stream);
+    source.connect(analyser);
+    log('音频分析器已设置', 'ok');
+  } catch (e) {
+    log('音频分析器设置失败: ' + e.message, 'err');
+  }
+}
+
+function startVisualization() {
+  const canvas = document.getElementById('waveCanvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth * 2;
+  canvas.height = canvas.offsetHeight * 2;
+
+  function draw() {
+    animationId = requestAnimationFrame(draw);
+    if (!analyser) return;
+
+    analyser.getByteTimeDomainData(analyserData);
+    analyser.getByteFrequencyData(analyserData);
+
+    // 计算音量
+    let sum = 0;
+    for (let i = 0; i < analyserData.length; i++) {
+      sum += Math.abs(analyserData[i] - 128);
+    }
+    const avg = sum / analyserData.length;
+    const volPct = Math.min(100, (avg / 60) * 100 * 2);
+    document.getElementById('volBar').style.width = volPct + '%';
+    document.getElementById('t-volume').textContent = volPct < 5 ? '— 安静' : volPct < 30 ? '🔈 轻声' : volPct < 60 ? '🔉 正常' : '🔊 大声';
+    document.getElementById('t-volume').className = 'test-value ' + (volPct < 5 ? 'pending' : volPct < 60 ? 'pass' : 'warn');
+
+    // 画波形
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#3b82f6';
+    ctx.beginPath();
+    const sliceWidth = canvas.width / analyserData.length;
+    let x = 0;
+    for (let i = 0; i < analyserData.length; i++) {
+      const v = analyserData[i] / 128.0;
+      const y = (v * canvas.height) / 2;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+      x += sliceWidth;
+    }
+    ctx.stroke();
+  }
+
+  draw();
+}
+
+// ============ Step 3: 语音识别测试（单击切换） ============
+function toggleSpeechTest() {
+  if (isSpeechTesting) {
+    // 停止
+    if (speechRecognition) {
+      speechRecognition._running = false;
+      speechRecognition.stop();
+    }
+    return;
+  }
+  startSpeechTest();
+}
+
+function startSpeechTest() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const btn = document.getElementById('btnSpeech');
+  const btnIcon = document.getElementById('btnSpeechIcon');
+  const btnText = document.getElementById('btnSpeechText');
+  const output = document.getElementById('recogOutput');
+  hideNetBanner(); // 清除上次的网络错误提示
+
+  if (!SpeechRecognition) {
+    output.textContent = '⚠️ 当前浏览器不支持语音识别\n请使用 Chrome 或 Safari';
+    output.className = 'recog-output';
+    log('语音识别：浏览器不支持', 'err');
+    return;
+  }
+
+  if (!stream) {
+    output.textContent = '⚠️ 请先完成 Step 2 的麦克风授权';
+    output.className = 'recog-output';
+    log('麦克风未获取，先获取麦克风', 'warn');
+    requestMic().then(() => {
+      if (stream) setTimeout(() => startSpeechTest(), 800);
+    });
+    return;
+  }
+
+  // 启动
+  isSpeechTesting = true;
+  btn.className = 'step-btn active';
+  btnIcon.textContent = '⏹️';
+  btnText.textContent = '停止识别';
+  output.textContent = '🎧 正在听，请说话...';
+  output.className = 'recog-output';
+  log('语音识别已启动');
+
+  speechRecognition = new SpeechRecognition();
+  speechRecognition._running = true;
+  speechRecognition.continuous = false;
+  speechRecognition.interimResults = false;
+
+  speechRecognition.onresult = (event) => {
+    let text = '';
+    for (let i = 0; i < event.results.length; i++) {
+      text += event.results[i][0].transcript;
+    }
+    if (text.trim()) {
+      output.textContent = '✅ 识别成功：' + text;
+      output.className = 'recog-output';
+      log('识别结果: ' + text, 'ok');
+    }
+  };
+
+  speechRecognition.onend = () => {
+    if (!speechRecognition._running) return;
+    speechRecognition._running = false;
+    isSpeechTesting = false;
+    btn.className = 'step-btn primary';
+    btnIcon.textContent = '🎤';
+    btnText.textContent = '开始语音识别';
+    log('语音识别结束');
+  };
+
+  speechRecognition.onerror = (event) => {
+    if (!speechRecognition._running) return;
+    speechRecognition._running = false;
+    isSpeechTesting = false;
+    btn.className = 'step-btn primary';
+    btnIcon.textContent = '🎤';
+    btnText.textContent = '开始语音识别';
+    log('语音识别错误: ' + event.error, 'err');
+
+    if (event.error === 'no-speech') {
+      output.textContent = '⚠️ 没听到声音，请靠近麦克风并重试';
+    } else if (event.error === 'not-allowed') {
+      output.textContent = '❌ 麦克风权限被拒绝，请刷新后允许权限';
+    } else if (event.error === 'network') {
+      const msg = '❌ 网络错误：语音识别需要访问 Google ASR 服务器\n请确认已开启全局代理 127.0.0.1:7897';
+      output.textContent = msg;
+      document.getElementById('netBanner').classList.add('show');
+      log('网络错误：Google ASR 无法访问。请检查代理设置。', 'err');
+    } else {
+      output.textContent = '❌ 错误: ' + event.error;
+    }
+    output.className = 'recog-output';
+  };
+
+  try {
+    speechRecognition.start();
+  } catch (e) {
+    speechRecognition._running = false;
+    isSpeechTesting = false;
+    btn.className = 'step-btn primary';
+    btnIcon.textContent = '🎤';
+    btnText.textContent = '开始语音识别';
+    log('启动语音识别异常: ' + e.message, 'err');
+  }
+}
+
+// ============ Step 4: 录音回放 ============
+function toggleRecording() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+function startRecording() {
+  if (!stream) {
+    log('麦克风未初始化，无法录音', 'err');
+    return;
+  }
+  try {
+    mediaRecorder = new MediaRecorder(stream);
+    recordedChunks = [];
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      recordedBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+      document.getElementById('recStatus').textContent = '录音完成，已保存 ' + (recordedBlob.size / 1024).toFixed(1) + ' KB';
+      document.getElementById('playBtn').style.display = 'inline-block';
+      log('录音完成，时长: ' + ((Date.now() - recordingStart) / 1000).toFixed(1) + '秒', 'ok');
+    };
+    mediaRecorder.start();
+    recordingStart = Date.now();
+    isRecording = true;
+    document.getElementById('recBtn').className = 'big-btn stop';
+    document.getElementById('recBtnIcon').textContent = '⏹️';
+    document.getElementById('recBtnText').textContent = '停止录音';
+    document.getElementById('recStatus').textContent = '🔴 录音中...';
+    document.getElementById('recHint').textContent = '录完后点击"停止录音"会自动播放';
+    document.getElementById('playBtn').style.display = 'none';
+    log('录音开始');
+  } catch (e) {
+    log('录音失败: ' + e.message, 'err');
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && isRecording) {
+    mediaRecorder.stop();
+    isRecording = false;
+    document.getElementById('recBtn').className = 'big-btn start';
+    document.getElementById('recBtnIcon').textContent = '🔴';
+    document.getElementById('recBtnText').textContent = '开始录音';
+  }
+}
+
+function playRecording() {
+  if (!recordedBlob) return;
+  const url = URL.createObjectURL(recordedBlob);
+  const audio = new Audio(url);
+  audio.onended = () => URL.revokeObjectURL(url);
+  audio.play();
+  log('播放录音');
+}
+
+// ============ 统一入口：点按钮 = 请求麦克风 + 语音识别 ============
+document.addEventListener('DOMContentLoaded', () => {
+  checkSupport();
+  // 不自动请求，等用户点 Step 2 按钮
+});
+
+// 给外部调用的入口（由 translate 页面调用）
+window.startMicTest = () => {
+  if (!stream) {
+    requestMic().then(() => { if (stream) setTimeout(() => startSpeechTest(), 800); });
+  } else {
+    startSpeechTest();
+  }
+};
+</script>
+</body>
+</html>
