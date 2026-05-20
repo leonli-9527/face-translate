@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>中阿英 面对面实时翻译</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #0f172a;
+    color: #e2e8f0;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+  }
+  .status-bar .title { font-size: 15px; font-weight: 600; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; vertical-align: middle; }
+  .status-dot.ready { background: #4ade80; }
+  .status-dot.listening { background: #ef4444; animation: blink 1s infinite; }
+  .status-dot.error { background: #f59e0b; }
+  .status-dot.net { background: #a855f7; }
+
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .main {
+    flex: 1;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .divider {
+    position: absolute;
+    top: 0; bottom: 0; left: 50%;
+    width: 44px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    pointer-events: none;
+  }
+  .divider-line { width: 2px; flex: 1; background: linear-gradient(to bottom, transparent, #475569, transparent); }
+  .flip-btn {
+    pointer-events: all;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: #334155;
+    border: 2px solid #475569;
+    color: #e2e8f0;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+  .flip-btn:active { background: #475569; transform: scale(0.92); }
+
+  .panel { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; }
+  .panel.left { background: #0f172a; }
+  .panel.right { background: #0f172a; }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: #1e293b;
+    border-bottom: 1px solid #334155;
+    flex-shrink: 0;
+  }
+  .lang-label { font-size: 14px; font-weight: 600; display: flex; align-items: center; cursor: pointer; }
+  .lang-label .flag { font-size: 18px; margin-right: 6px; }
+  .mode-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #334155;
+    color: #94a3b8;
+    transition: all 0.3s;
+  }
+  .mode-badge.active { background: #059669; color: #fff; }
+  .mode-badge.error { background: #dc2626; color: #fff; }
+  .mode-badge.net { background: #7c3aed; color: #fff; }
+
+  .chat-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chat-area::-webkit-scrollbar { width: 3px; }
+  .chat-area::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+
+  .bubble {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 15px;
+    line-height: 1.5;
+    word-break: break-word;
+    animation: fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+
+  .bubble .meta { font-size: 11px; color: #64748b; margin-bottom: 4px; }
+  .bubble.source { align-self: flex-start; background: #1e293b; border-bottom-left-radius: 4px; }
+  .bubble.translated { align-self: flex-end; background: #1d4ed8; border-bottom-right-radius: 4px; color: #fff; }
+  .panel.right .bubble.source { align-self: flex-end; border-bottom-left-radius: 16px; border-bottom-right-radius: 4px; }
+  .panel.right .bubble.translated { align-self: flex-start; border-bottom-left-radius: 4px; border-bottom-right-radius: 16px; }
+
+  .controls {
+    padding: 10px 14px;
+    background: #1e293b;
+    border-top: 1px solid #334155;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .mic-btn {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mic-btn.idle { background: #334155; color: #e2e8f0; }
+  .mic-btn.idle:active { background: #3b82f6; }
+  .mic-btn.listening {
+    background: #dc2626; color: #fff;
+    animation: micPulse 1.2s infinite;
+    box-shadow: 0 0 0 0 rgba(220,38,38,0.5);
+  }
+  @keyframes micPulse {
+    0% { box-shadow: 0 0 0 0 rgba(220,38,38,0.6); }
+    70% { box-shadow: 0 0 0 14px rgba(220,38,38,0); }
+    100% { box-shadow: 0 0 0 0 rgba(220,38,38,0); }
+  }
+
+  .text-input {
+    flex: 1;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 20px;
+    padding: 10px 16px;
+    color: #e2e8f0;
+    font-size: 15px;
+    outline: none;
+  }
+  .text-input:focus { border-color: #3b82f6; }
+  .text-input::placeholder { color: #475569; }
+
+  .send-btn {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    border: none;
+    background: #3b82f6;
+    color: #fff;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .send-btn:active { background: #2563eb; }
+
+  .lang-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .lang-modal.show { display: flex; }
+  .lang-sheet {
+    background: #1e293b;
+    width: 100%;
+    max-width: 420px;
+    border-radius: 20px 20px 0 0;
+    padding: 20px 16px 40px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+  .lang-sheet h3 {
+    text-align: center;
+    margin-bottom: 16px;
+    color: #94a3b8;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .lang-option {
+    display: flex;
+    align-items: center;
+    padding: 12px 14px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .lang-option:active { background: #334155; }
+  .lang-option.selected { background: #1d4ed8; }
+  .lang-option .flag { font-size: 24px; margin-right: 12px; }
+  .lang-option .name { font-size: 16px; }
+  .lang-option .name small { color: #64748b; font-size: 12px; margin-left: 6px; }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #475569;
+    font-size: 14px;
+    gap: 8px;
+    padding: 20px;
+    text-align: center;
+  }
+  .empty-state .icon { font-size: 40px; }
+
+  .error-toast {
+    position: fixed;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #dc2626;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    z-index: 200;
+    animation: fadeIn 0.3s ease;
+    max-width: 90vw;
+    text-align: center;
+  }
+  .error-toast.warn { background: #7c3aed; }
+  .error-toast.info { background: #3b82f6; }
+
+  .net-banner {
+    position: fixed;
+    top: 52px;
+    left: 0; right: 0;
+    background: #7c3aed;
+    color: #fff;
+    font-size: 13px;
+    text-align: center;
+    padding: 8px 16px;
+    z-index: 50;
+    display: none;
+  }
+  .net-banner.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="status-bar">
+  <div class="title">🌐 面对面翻译</div>
+  <div id="statusText"><span class="status-dot ready" id="statusDot"></span>就绪 · 点击麦克风开始</div>
+</div>
+
+<div class="net-banner" id="netBanner">
+  ⚠️ 语音识别网络错误，请确认浏览器已配置代理 127.0.0.1:7897
+</div>
+
+<div class="main">
+  <!-- 左面板 -->
+  <div class="panel left">
+    <div class="panel-header">
+      <div class="lang-label" onclick="showLangPicker('left')">
+        <span class="flag" id="leftFlag">🇨🇳</span>
+        <span id="leftLangName">中文</span>
+      </div>
+      <div class="mode-badge" id="leftBadge">点击说话</div>
+    </div>
+    <div class="chat-area" id="leftChat">
+      <div class="empty-state">
+        <div class="icon">🎤</div>
+        <div>点击下方麦克风开始说话</div>
+        <div style="font-size:12px;color:#64748b">识别到语音后将自动翻译</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="mic-btn idle" id="leftMic" onclick="toggleListening('left')">🎤</button>
+      <input class="text-input" id="leftInput" placeholder="或输入文字后按回车..." onkeydown="if(event.key==='Enter')sendText('left')">
+      <button class="send-btn" onclick="sendText('left')">➤</button>
+    </div>
+  </div>
+
+  <div class="divider">
+    <div class="divider-line"></div>
+    <button class="flip-btn" onclick="swapLanguages()">⇄</button>
+    <div class="divider-line"></div>
+  </div>
+
+  <!-- 右面板 -->
+  <div class="panel right">
+    <div class="panel-header">
+      <div class="lang-label" onclick="showLangPicker('right')">
+        <span class="flag" id="rightFlag">🇸🇦</span>
+        <span id="rightLangName">العربية</span>
+      </div>
+      <div class="mode-badge" id="rightBadge">点击说话</div>
+    </div>
+    <div class="chat-area" id="rightChat">
+      <div class="empty-state">
+        <div class="icon">🎤</div>
+        <div>اضغط على الميكروفون للتحدث</div>
+        <div style="font-size:12px;color:#64748b">سيتم الترجمة تلقائياً</div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="mic-btn idle" id="rightMic" onclick="toggleListening('right')">🎤</button>
+      <input class="text-input" id="rightInput" placeholder="...أو اكتب نصًا" onkeydown="if(event.key==='Enter')sendText('right')" dir="rtl">
+      <button class="send-btn" onclick="sendText('right')">➤</button>
+    </div>
+  </div>
+</div>
+
+<div class="lang-modal" id="langModal">
+  <div class="lang-sheet">
+    <h3>选择语言</h3>
+    <div id="langOptions"></div>
+  </div>
+</div>
+
+<script>
+// ============ 配置 ============
+const LANGUAGES = [
+  { code: 'zh-CN', name: '中文',      nameEn: 'Chinese',   flag: '🇨🇳', speechLang: 'zh-CN', speechLabel: '中文' },
+  { code: 'ar',    name: 'العربية',  nameEn: 'Arabic',    flag: '🇸🇦', speechLang: 'ar',    speechLabel: '阿拉伯语' },
+  { code: 'en',   name: 'English',  nameEn: 'English',   flag: '🇬🇧', speechLang: 'en-US', speechLabel: 'English' },
+  { code: 'ja',   name: '日本語',   nameEn: 'Japanese',  flag: '🇯🇵', speechLang: 'ja-JP', speechLabel: '日本語' },
+  { code: 'ko',   name: '한국어',   nameEn: 'Korean',    flag: '🇰🇷', speechLang: 'ko-KR', speechLabel: '한국어' },
+  { code: 'fr',   name: 'Français', nameEn: 'French',    flag: '🇫🇷', speechLang: 'fr-FR', speechLabel: 'Français' },
+  { code: 'de',   name: 'Deutsch',  nameEn: 'German',    flag: '🇩🇪', speechLang: 'de-DE', speechLabel: 'Deutsch' },
+  { code: 'es',   name: 'Español',  nameEn: 'Spanish',   flag: '🇪🇸', speechLang: 'es-ES', speechLabel: 'Español' },
+  { code: 'ru',   name: 'Русский',  nameEn: 'Russian',   flag: '🇷🇺', speechLang: 'ru-RU', speechLabel: 'Русский' },
+  { code: 'pt',   name: 'Português',nameEn:'Portuguese', flag: '🇧🇷', speechLang: 'pt-BR', speechLabel: 'Português' },
+];
+
+let state = {
+  leftLang: 'zh-CN',
+  rightLang: 'ar',
+  leftHistory: [],
+  rightHistory: [],
+  pickerSide: 'left',
+};
+
+// 每个侧边一个独立的 recognition 实例
+let recLeft = null;
+let recRight = null;
+
+// ============ 翻译引擎 ============
+async function translate(text, from, to) {
+  if (!text.trim()) return '';
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    let result = '';
+    if (data && data[0]) {
+      for (const seg of data[0]) {
+        if (seg && seg[0]) result += seg[0];
+      }
+    }
+    return result || text;
+  } catch (e) {
+    console.warn('Google翻译失败:', e);
+    try {
+      const url2 = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`;
+      const res2 = await fetch(url2);
+      const data2 = await res2.json();
+      return data2?.responseData?.translatedText || '⚠️ 翻译失败';
+    } catch (e2) {
+      return '⚠️ 翻译失败，请检查网络';
+    }
+  }
+}
+
+// ============ 语音识别：单击切换 ============
+function toggleListening(side) {
+  const rec = side === 'left' ? recLeft : recRight;
+  if (rec && rec._active) {
+    // 正在听 → 停止
+    rec.stop();
+  } else {
+    // 空闲 → 开始
+    startListening(side);
+  }
+}
+
+function startListening(side) {
+  const langCode = side === 'left' ? state.leftLang : state.rightLang;
+  const langObj = LANGUAGES.find(l => l.code === langCode);
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showToast('浏览器不支持语音识别，请使用 Chrome 或 Safari', 'warn');
+    return;
+  }
+
+  // 先停掉另一侧
+  stopAllRecognition();
+
+  const rec = new SpeechRecognition();
+  // 关键：使用 speechLang 而不是 code
+  // 中文用 zh-CN，阿拉伯语用 ar（不用 ar-SA，避免 Google 不识别）
+  rec.lang = langObj?.speechLang || langCode;
+  rec.interimResults = false;
+  rec.continuous = false;
+  rec._active = true;
+
+  if (side === 'left') recLeft = rec; else recRight = rec;
+
+  const btn = document.getElementById(side + 'Mic');
+  const badge = document.getElementById(side + 'Badge');
+
+  btn.className = 'mic-btn listening';
+  badge.textContent = '🎧 正在听...';
+  badge.className = 'mode-badge active';
+  setStatus('listening', '正在听 ' + (langObj?.speechLabel || langCode) + '...');
+
+  let finalText = '';
+
+  rec.onresult = (event) => {
+    for (let i = 0; i < event.results.length; i++) {
+      if (event.results[i].isFinal) {
+        finalText += event.results[i][0].transcript;
+      }
+    }
+  };
+
+  rec.onend = () => {
+    rec._active = false;
+    btn.className = 'mic-btn idle';
+    badge.textContent = '点击说话';
+    badge.className = 'mode-badge';
+    hideNetBanner();
+    setStatus('ready', '就绪 · 点击麦克风开始');
+
+    if (side === 'left') recLeft = null; else recRight = null;
+
+    if (finalText.trim()) {
+      processTranslation(side, finalText.trim());
+    }
+  };
+
+  rec.onerror = (event) => {
+    console.error('语音识别错误:', event.error);
+    rec._active = false;
+    btn.className = 'mic-btn idle';
+    badge.textContent = '点击说话';
+    badge.className = 'mode-badge';
+    hideNetBanner();
+
+    if (side === 'left') recLeft = null; else recRight = null;
+
+    if (event.error === 'not-allowed') {
+      showToast('请允许浏览器访问麦克风权限', 'warn');
+      setStatus('error', '需要麦克风权限');
+    } else if (event.error === 'no-speech') {
+      // 没听清不算错误，静默重置
+      setStatus('ready', '没听清，请重试');
+    } else if (event.error === 'network') {
+      showNetBanner();
+      showToast('语音识别需要 Google 服务器，请确认代理已启用', 'warn');
+      setStatus('net', '网络错误 · 需配置代理');
+    } else if (event.error === 'aborted') {
+      // 用户主动停止，不提示
+      setStatus('ready', '就绪');
+    } else {
+      showToast('识别错误: ' + event.error, 'warn');
+      setStatus('error', '识别错误: ' + event.error);
+    }
+  };
+
+  try {
+    rec.start();
+  } catch (e) {
+    console.error('启动识别失败:', e);
+    rec._active = false;
+    btn.className = 'mic-btn idle';
+    badge.className = 'mode-badge';
+    showToast('启动识别失败: ' + e.message, 'warn');
+    setStatus('error', '启动失败');
+  }
+}
+
+function stopAllRecognition() {
+  if (recLeft && recLeft._active) { recLeft._active = false; try { recLeft.stop(); } catch(e){} recLeft = null; }
+  if (recRight && recRight._active) { recRight._active = false; try { recRight.stop(); } catch(e){} recRight = null; }
+  hideNetBanner();
+  ['left', 'right'].forEach(s => {
+    document.getElementById(s + 'Mic').className = 'mic-btn idle';
+    const b = document.getElementById(s + 'Badge');
+    b.textContent = '点击说话';
+    b.className = 'mode-badge';
+  });
+}
+
+// ============ 处理翻译 ============
+async function processTranslation(side, text) {
+  const fromLang = side === 'left' ? state.leftLang : state.rightLang;
+  const toLang = side === 'left' ? state.rightLang : state.leftLang;
+
+  addBubble(side, 'source', text);
+
+  setStatus('ready', '翻译中...');
+  const translated = await translate(text, fromLang, toLang);
+  setStatus('ready', '就绪 · 点击麦克风开始');
+
+  const targetSide = side === 'left' ? 'right' : 'left';
+  addBubble(targetSide, 'translated', translated);
+
+  speak(translated, toLang);
+}
+
+function addBubble(side, type, text) {
+  const chatEl = document.getElementById(side + 'Chat');
+  const empty = chatEl.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const label = type === 'source' ? '原文' : '翻译';
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${type}`;
+  bubble.innerHTML = `<div class="meta">${label}</div><div>${escapeHtml(text)}</div>`;
+  chatEl.appendChild(bubble);
+  chatEl.scrollTop = chatEl.scrollHeight;
+
+  if (side === 'left') state.leftHistory.push({ type, text, time: Date.now() });
+  else state.rightHistory.push({ type, text, time: Date.now() });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ============ 语音播放 ============
+function speak(text, langCode) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(text);
+  const langObj = LANGUAGES.find(l => l.code === langCode);
+  utter.lang = langObj?.speechLang || langCode;
+  utter.rate = 0.9;
+  utter.pitch = 1.0;
+  window.speechSynthesis.speak(utter);
+}
+
+// ============ 文字输入 ============
+function sendText(side) {
+  const input = document.getElementById(side + 'Input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  processTranslation(side, text);
+}
+
+// ============ 状态栏 ============
+function setStatus(type, msg) {
+  const dot = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  dot.className = 'status-dot ' + type;
+  text.innerHTML = '';
+  const newDot = document.createElement('span');
+  newDot.className = 'status-dot ' + type;
+  newDot.id = 'statusDot';
+  text.appendChild(newDot);
+  text.appendChild(document.createTextNode(msg));
+}
+
+// ============ Toast 提示 ============
+function showToast(msg, type = '') {
+  const existing = document.querySelector('.error-toast');
+  if (existing) existing.remove();
+  const el = document.createElement('div');
+  el.className = 'error-toast' + (type ? ' ' + type : '');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 5000);
+}
+
+// ============ 网络错误横幅 ============
+function showNetBanner() {
+  document.getElementById('netBanner').classList.add('show');
+}
+function hideNetBanner() {
+  document.getElementById('netBanner').classList.remove('show');
+}
+
+// ============ 语言切换 ============
+function showLangPicker(side) {
+  state.pickerSide = side;
+  const modal = document.getElementById('langModal');
+  const optionsEl = document.getElementById('langOptions');
+  optionsEl.innerHTML = '';
+  const currentLang = side === 'left' ? state.leftLang : state.rightLang;
+
+  for (const lang of LANGUAGES) {
+    const opt = document.createElement('div');
+    opt.className = `lang-option ${lang.code === currentLang ? 'selected' : ''}`;
+    opt.innerHTML = `<span class="flag">${lang.flag}</span><span class="name">${lang.name} <small>${lang.nameEn}</small></span>`;
+    opt.onclick = () => selectLang(side, lang.code);
+    optionsEl.appendChild(opt);
+  }
+
+  modal.classList.add('show');
+  modal.onclick = (e) => { if (e.target === modal) modal.classList.remove('show'); };
+}
+
+function selectLang(side, code) {
+  const langObj = LANGUAGES.find(l => l.code === code);
+  if (!langObj) return;
+  if (side === 'left') {
+    state.leftLang = code;
+    document.getElementById('leftFlag').textContent = langObj.flag;
+    document.getElementById('leftLangName').textContent = langObj.name;
+  } else {
+    state.rightLang = code;
+    document.getElementById('rightFlag').textContent = langObj.flag;
+    document.getElementById('rightLangName').textContent = langObj.name;
+  }
+  document.getElementById('langModal').classList.remove('show');
+}
+
+function swapLanguages() {
+  const tmp = state.leftLang;
+  state.leftLang = state.rightLang;
+  state.rightLang = tmp;
+  const leftObj = LANGUAGES.find(l => l.code === state.leftLang);
+  const rightObj = LANGUAGES.find(l => l.code === state.rightLang);
+  document.getElementById('leftFlag').textContent = leftObj?.flag || '🇨🇳';
+  document.getElementById('leftLangName').textContent = leftObj?.name || '中文';
+  document.getElementById('rightFlag').textContent = rightObj?.flag || '🇸🇦';
+  document.getElementById('rightLangName').textContent = rightObj?.name || 'العربية';
+  const leftInput = document.getElementById('leftInput');
+  const rightInput = document.getElementById('rightInput');
+  leftInput.placeholder = leftObj?.code === 'ar' ? '...اكتب نصًا' : '或输入文字后按回车...';
+  leftInput.dir = leftObj?.code === 'ar' ? 'rtl' : 'ltr';
+  rightInput.placeholder = rightObj?.code === 'ar' ? '...اكتب نصًا' : '或输入文字后按回车...';
+  rightInput.dir = rightObj?.code === 'ar' ? 'rtl' : 'ltr';
+}
+
+// ============ 初始化 ============
+document.addEventListener('DOMContentLoaded', () => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setStatus('error', '浏览器不支持语音识别');
+    showToast('请使用 Chrome 或 Safari 浏览器打开此页面', 'warn');
+  }
+  document.addEventListener('dblclick', e => e.preventDefault());
+});
+</script>
+</body>
+</html>
