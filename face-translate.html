@@ -453,6 +453,10 @@ async function translate(text, from, to) {
 
 // ============ 语音识别：单击切换 ============
 function toggleListening(side) {
+  if (isIOS()) {
+    showToast('iPhone 暂不支持语音输入，请用下方输入框打字', 'info');
+    return;
+  }
   unlockTTS(); // 确保每次交互都解锁
   const rec = side === 'left' ? recLeft : recRight;
   if (rec && rec._active) {
@@ -812,12 +816,22 @@ function swapLanguages() {
   rightInput.dir = rightObj?.code === 'ar' ? 'rtl' : 'ltr';
 }
 
+// ============ 设备检测 ============
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', () => {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    setStatus('error', '浏览器不支持语音识别');
-    showToast('请使用 Chrome 或 Safari 浏览器打开此页面', 'warn');
+    if (isIOS()) {
+      setStatus('ready', 'iPhone 暂不支持语音识别，请用文字输入');
+      showToast('iPhone 暂不支持语音识别，请用下方输入框打字翻译', 'info');
+    } else {
+      setStatus('error', '浏览器不支持语音识别');
+      showToast('请使用 Chrome 或 Safari 浏览器打开此页面', 'warn');
+    }
   }
   document.addEventListener('dblclick', e => e.preventDefault());
 
