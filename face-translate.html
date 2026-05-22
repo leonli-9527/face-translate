@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>中阿英 面对面实时翻译</title>
+<title>中阿英 面对面实时翻译 · 混元引擎</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -284,7 +284,7 @@
 <body>
 
 <div class="status-bar">
-  <div class="title">🌐 面对面翻译</div>
+  <div class="title">🌐 面对面翻译 · 混元</div>
   <div id="statusText"><span class="status-dot ready" id="statusDot"></span>就绪 · 点击麦克风开始</div>
 </div>
 
@@ -380,30 +380,44 @@ let state = {
 let recLeft = null;
 let recRight = null;
 
-// ============ 翻译引擎 ============
+// ============ 翻译引擎：腾讯混元（通过本地代理） ============
+// 自动检测运行环境：本地服务器用相对路径，GitHub Pages 用兜底方案
+function getApiBase() {
+  // 如果是从本地 server.js 访问，/api/translate 直接可用
+  // 如果是从 GitHub Pages 访问，需要指向本地服务器
+  if (window.location.port === '3456' || window.location.hostname !== 'localhost') {
+    return '';  // 同源，直接用相对路径
+  }
+  return `http://${window.location.hostname}:3456`;
+}
+
 async function translate(text, from, to) {
   if (!text.trim()) return '';
+  const apiBase = getApiBase();
+  const url = `${apiBase}/api/translate?text=${encodeURIComponent(text)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
   try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    let result = '';
-    if (data && data[0]) {
-      for (const seg of data[0]) {
-        if (seg && seg[0]) result += seg[0];
-      }
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || 'HTTP ' + res.status);
     }
-    return result || text;
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data.translated || text;
   } catch (e) {
-    console.warn('Google翻译失败:', e);
+    console.warn('混元翻译失败:', e);
+    // 兜底：尝试 Google Translate
     try {
-      const url2 = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`;
+      const url2 = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(text)}`;
       const res2 = await fetch(url2);
       const data2 = await res2.json();
-      return data2?.responseData?.translatedText || '⚠️ 翻译失败';
+      let result = '';
+      if (data2 && data2[0]) {
+        for (const seg of data2[0]) { if (seg && seg[0]) result += seg[0]; }
+      }
+      return result || '⚠️ 翻译失败';
     } catch (e2) {
-      return '⚠️ 翻译失败，请检查网络';
+      return '⚠️ 翻译失败，请确认翻译服务已启动';
     }
   }
 }
