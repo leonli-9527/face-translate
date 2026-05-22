@@ -453,6 +453,7 @@ async function translate(text, from, to) {
 
 // ============ 语音识别：单击切换 ============
 function toggleListening(side) {
+  unlockTTS(); // 确保每次交互都解锁
   const rec = side === 'left' ? recLeft : recRight;
   if (rec && rec._active) {
     // 正在听 → 停止
@@ -618,9 +619,10 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// ============ 语音播报（增强版） ============
+// ============ 语音播报（增强版 + iOS 兼容） ============
 let speakEnabled = true;
 let voicesLoaded = false;
+let ttsUnlocked = false; // iOS 需要用户交互解锁
 
 function loadVoices() {
   const voices = speechSynthesis.getVoices();
@@ -631,15 +633,31 @@ if ('speechSynthesis' in window) {
   loadVoices();
 }
 
+// iOS Safari 必须在用户交互事件中调用一次 speechSynthesis.speak() 才能解锁
+// 用一个极短的静音 utterance 来解锁
+function unlockTTS() {
+  if (ttsUnlocked) return;
+  if (!('speechSynthesis' in window)) return;
+  try {
+    const u = new SpeechSynthesisUtterance('');
+    u.volume = 0;
+    u.rate = 10;
+    speechSynthesis.speak(u);
+    ttsUnlocked = true;
+  } catch (e) {
+    console.warn('TTS unlock failed:', e);
+  }
+}
+
 function speak(text, langCode) {
   if (!speakEnabled) return;
   if (!('speechSynthesis' in window)) {
     showToast('此浏览器不支持语音播报', 'warn');
     return;
   }
+  if (!text || !text.trim()) return;
 
-  // iOS Safari 修复：先 cancel 再 speak
-  window.speechSynthesis.cancel();
+  speechSynthesis.cancel();
 
   const utter = new SpeechSynthesisUtterance(text);
   const langObj = LANGUAGES.find(l => l.code === langCode);
@@ -651,8 +669,7 @@ function speak(text, langCode) {
   // 尝试匹配最佳声音
   const voices = speechSynthesis.getVoices();
   if (voices.length > 0) {
-    const targetLang = utter.lang.split('-')[0]; // e.g. 'ar', 'zh', 'en'
-    // 优先找匹配语言+地区的声音
+    const targetLang = utter.lang.split('-')[0];
     let voice = voices.find(v => v.lang === utter.lang && !v.localService === false);
     if (!voice) voice = voices.find(v => v.lang === utter.lang);
     if (!voice) voice = voices.find(v => v.lang.startsWith(targetLang));
@@ -660,13 +677,24 @@ function speak(text, langCode) {
   }
 
   utter.onstart = () => setStatus('ready', '🔊 正在播报...');
-  utter.onend = () => setStatus('ready', '就绪 · 点击麦克风开始');
-  utter.onerror = () => setStatus('ready', '就绪 · 点击麦克风开始');
+  utter.onend = () => {
+    // iOS Safari 长文本播报 bug：有时 onend 不会触发
+    // 用 setTimeout 兜底恢复状态
+    setTimeout(() => setStatus('ready', '就绪 · 点击麦克风开始'), 500);
+  };
+  utter.onerror = (e) => {
+    console.warn('TTS error:', e);
+    setStatus('ready', '就绪 · 点击麦克风开始');
+  };
 
-  // iOS Safari 修复：用 setTimeout 包一层，确保 cancel 生效
+  // iOS Safari 兼容：cancel 后必须延迟
   setTimeout(() => {
-    speechSynthesis.speak(utter);
-  }, 50);
+    try {
+      speechSynthesis.speak(utter);
+    } catch (e) {
+      console.warn('Speak failed:', e);
+    }
+  }, 100);
 }
 
 function toggleSpeak() {
@@ -677,6 +705,8 @@ function toggleSpeak() {
     btn.className = 'speak-btn on';
     btn.title = '语音播报：开启';
     showToast('语音播报已开启', 'info');
+    // 切换开启时也解锁一下
+    unlockTTS();
   } else {
     speechSynthesis.cancel();
     btn.textContent = '🔇';
@@ -689,6 +719,7 @@ function toggleSpeak() {
 
 // ============ 文字输入 ============
 function sendText(side) {
+  unlockTTS(); // 确保用户交互解锁
   const input = document.getElementById(side + 'Input');
   const text = input.value.trim();
   if (!text) return;
@@ -789,6 +820,10 @@ document.addEventListener('DOMContentLoaded', () => {
     showToast('请使用 Chrome 或 Safari 浏览器打开此页面', 'warn');
   }
   document.addEventListener('dblclick', e => e.preventDefault());
+
+  // iOS: 任何 touch/click 事件都尝试解锁 TTS
+  document.addEventListener('click', () => unlockTTS(), { once: true });
+  document.addEventListener('touchstart', () => unlockTTS(), { once: true });
 });
 </script>
 </body>
